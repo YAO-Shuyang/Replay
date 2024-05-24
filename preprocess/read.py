@@ -38,7 +38,7 @@ def read_behav(
             )
         else:
             file_name = files[0]
-
+ 
     f_dir = os.path.join(dir_name, file_name)
     return pd.read_excel(f_dir, **kwargs)
 
@@ -141,8 +141,35 @@ def read_good_units(
         )
     return np.loadtxt(f_dir).astype(np.int64)
 
+def read_LFP(dir_name: str) -> np.array:
+    """
+    Read Local Field Potential.
+    """
+    files = [f for f in os.listdir(dir_name) if "lf.bin" in f]
+    if len(files) == 0:
+        raise FileNotFoundError(f"Fail to find lf.bin in {dir_name}")
+    elif len(files) > 1:
+        raise Exception(
+            f"Found more than one lf.bin in {dir_name}:\n"
+            f"{files}"
+        )
+    else:
+        file_name = files[0]
+
+    f_dir = os.path.join(dir_name, file_name)
+
+    with open(f_dir, 'rb') as f:
+        data = np.fromfile(f)
+
+    import matplotlib.pyplot as plt
+
+    plt.plot(np.arange(10000), data[:10000])
+    plt.show()
+
 def read_npxdata(dir_name: str) -> dict:
-    """read all neuropixel data from the given directory"""
+    """
+    read all neuropixel data from the given directory
+    """
     spike_times = read_neural_time(f1['npx_path'][0])
     spike_clusters = read_neural_activity(f1['npx_path'][0])
     
@@ -164,18 +191,20 @@ def read_npxdata(dir_name: str) -> dict:
         'n_neuron': n_neuron
     }
 
+
+
 if __name__ == "__main__":
     from replay.local_path import f1
 
     # Test neural time
     spike_times = read_neural_time(dir_name=f1['npx_path'][0])
-    print(spike_times, type(spike_times))
-    print(spike_times.shape, spike_times.dtype, end="\n\n")
+    # print(spike_times, type(spike_times))
+    # print(spike_times.shape, spike_times.dtype, end="\n\n")
 
     # Test neural activity
     spike_clusters = read_neural_activity(dir_name=f1['npx_path'][0])
-    print(spike_clusters, type(spike_clusters))
-    print(spike_clusters.shape, spike_clusters.dtype, end="\n\n")
+    # print(spike_clusters, type(spike_clusters))
+    # print(spike_clusters.shape, spike_clusters.dtype, end="\n\n")
     
     # Test brain region
     n_neuron = np.max(spike_clusters)
@@ -183,12 +212,15 @@ if __name__ == "__main__":
         dir_name=f1['npx_path'][0], 
         n_neuron=n_neuron
     )
-    print(brain_region, type(brain_region), brain_region.shape)
+    # print(brain_region, type(brain_region), brain_region.shape)
 
     # Test good units
     good_units = read_good_units(dir_name=f1['npx_path'][0])
-    print(good_units, type(good_units), good_units.shape)
+    # print(good_units, type(good_units), good_units.shape)
 
     # Test length consistency
     assert np.where(brain_region != '')[0].shape[0] == len(good_units)
     assert np.where(np.where(brain_region != '')[0] + 1 - good_units != 0)[0].shape[0] == 0
+
+    # Test LFP
+    read_LFP(dir_name=f1['npx_path'][1])
