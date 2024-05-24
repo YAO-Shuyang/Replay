@@ -2,6 +2,15 @@ import numpy as np
 from replay.preprocess.read import read_behav
 from datetime import datetime, timedelta
 
+"""
+Paradigms:
+Aronov et al., 2017 {https://www.nature.com/articles/nature21692}
+
+SMT: Sound Modulation Task
+PP: Passive Playback
+PPR: Pasive Playback with Rewards
+"""
+
 def transform_time_format(time_stamp: np.ndarray) -> np.ndarray:
     """
     transform date time, xx:xx:xx.xxx to xx.xxx
@@ -19,11 +28,12 @@ def transform_time_format(time_stamp: np.ndarray) -> np.ndarray:
     Example
     --------
     >>> time = np.array(['12:34:56.789', '01:23:45.678', '23:59:59.999'])
-    >>> time = transform_time_format(time)
-    >>> time
+    >>> converted_time = transform_time_format(time)
+    >>> converted_time
     array([45296.789,  5025.678, 86399.999])
     """
-    # Split the time strings by ':' and '.' to separate hours, minutes, seconds, and microseconds
+    # Split the time strings by ':' and '.' to separate hours, 
+    # minutes, seconds, and microseconds
     converted_time = np.zeros_like(time_stamp, dtype = np.float64)
 
     for i in range(len(time_stamp)):
@@ -51,7 +61,9 @@ def process_SMT_data(dir_name: str) -> np.ndarray:
     # Read Frequency
     f_behav_freq = read_behav(dir_name=dir_name, sheet_name="Frequency")
     freq = np.array(f_behav_freq['Frequency'])
-    freq_time = transform_time_format(np.array(f_behav_freq['Time']).astype('>U12'))
+    freq_time = transform_time_format(
+        np.array(f_behav_freq['Time']).astype('>U12')
+    )
     print(freq.shape, freq_time.shape)
     print(freq_time)
 
