@@ -141,9 +141,22 @@ def read_good_units(
         )
     return np.loadtxt(f_dir).astype(np.int64)
 
-def read_LFP(dir_name: str) -> np.array:
+def read_LFP(dir_name: str) -> np.ndarray:
     """
     Read Local Field Potential.
+
+    Refer to:
+    https://github.com/bartulem/KISN-PyLab/blob/master/kisn_pylab/surface.py
+
+    Parameters
+    ----------
+    dir_name : str
+        Directory of local field potential data.
+
+    Returns
+    -------
+    np.ndarray
+        The local field potential.
     """
     files = [f for f in os.listdir(dir_name) if "lf.bin" in f]
     if len(files) == 0:
@@ -158,13 +171,10 @@ def read_LFP(dir_name: str) -> np.array:
 
     f_dir = os.path.join(dir_name, file_name)
 
-    with open(f_dir, 'rb') as f:
+    with open(f_dir, 'r') as f:
         data = np.fromfile(f)
 
-    import matplotlib.pyplot as plt
-
-    plt.plot(np.arange(10000), data[:10000])
-    plt.show()
+    return data
 
 def read_npxdata(dir_name: str) -> dict:
     """
@@ -223,4 +233,20 @@ if __name__ == "__main__":
     assert np.where(np.where(brain_region != '')[0] + 1 - good_units != 0)[0].shape[0] == 0
 
     # Test LFP
-    read_LFP(dir_name=f1['npx_path'][1])
+    from replay.preprocess.LFP import SeekSurface
+    print(f"Channel Number: {n_neuron}")
+    """
+    seeker = SeekSurface(f1['npx_path'][0])
+    seeker.find_surface_channel(
+        nchan = n_neuron,
+        lfp_sampling_frequency = 2500,
+        lfp_gain_setting = 250,
+        power_threshold = 2.5,
+        diff_threshold = -0.06,
+        freq_range = [0, 10],
+        channel_range = 0,
+        nfft = 4096,
+        n_passes = 5,
+        skip_s_per_pass = 5
+    )
+    """
