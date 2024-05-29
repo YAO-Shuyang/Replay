@@ -247,5 +247,3 @@ class SeekSurface:
 
 if __name__ == '__main__':
     from replay.local_path import f1
-
-    seeker =    SeekSurface()
