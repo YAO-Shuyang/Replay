@@ -79,11 +79,10 @@ def process_dlc(dlc_data: dict) -> dict:
     thre = threshold_otsu(lever_depth)
     is_press = np.where(lever_depth >= thre, 0, 1)
 
-    print("thre: ",thre)
-
     return {
         'lever_depth': lever_depth,
-        'is_press': is_press
+        'is_press': is_press,
+        'lever_thre': thre
     }
 
 def read_behav(
@@ -135,7 +134,7 @@ def transform_time_format(time_stamp: np.ndarray) -> np.ndarray:
 
     Returns
     -------
-    np.ndarray
+    converted time stamp : np.ndarray
         date time, xx.xxx
 
     Example
@@ -161,36 +160,47 @@ def transform_time_format(time_stamp: np.ndarray) -> np.ndarray:
 
     return converted_time.astype(np.float64)
 
-def get_reward_info(dir_name: str, keywords: str) -> np.ndarray:
+
+def get_reward_info(dir_name: str) -> np.ndarray:
     """
-    process behavioral data
+    Get and process reward information
     
     Returns
     -------
-    np.ndarray
-        2D array, one row for reward behavioral data, with a shape of 3 x T
-        i.e., time, frequency, and behavioral states
+    reward_time : np.ndarray
+    reward_label : np.ndarray
+        1 - 液体奖励
+        2 - 液体输出
+        3 - 饮水
     """
     # Read Events
     f = read_behav(dir_name=dir_name, sheet_name="Protocol Result Data")
-    reward_events_idx = np.where(f['事件'] == keywords)[0]
-    #reward_events_idx = np.where(
-    #    (f['事件'] == "液体奖励") |
-    #    (f['事件'] == "液体输出") |
-    #    (f['事件'] == "饮水")
-    #)[0]
+    reward_events_idx = np.where(
+        (f['事件'] == "液体奖励") |
+        (f['事件'] == "液体输出") |
+        (f['事件'] == "饮水")
+    )[0]
 
-    reward_time = np.unique(
-        transform_time_format(np.array(f['测试时间']))[reward_events_idx]
-    )
+    reward_events = f['事件'][reward_events_idx]
+    reward_label = np.zeros(reward_events_idx.shape[0], dtype = np.int64)
+    reward_label[np.where(reward_events == "液体奖励")[0]] = 1
+    reward_label[np.where(reward_events == "液体输出")[0]] = 2
+    reward_label[np.where(reward_events == "饮水")[0]] = 3
 
-    # Several reward events were recorded for multiple times, merge them.
-    # Minimum interval for two consecutive rewards is 1s.
-    dt = np.ediff1d(reward_time)
-    merged_time = np.concatenate([
-        [reward_time[0]], reward_time[np.where(dt > 1)[0]+1]
-    ])
-    return merged_time
+    reward_time = transform_time_format(np.array(f['测试时间']))[reward_events_idx]
+    return reward_time, reward_label
+
+def identify_trials_SMT(
+    lever_states: np.ndarray,
+    dorm_frequency: np.ndarray
+):
+    """
+    Identify trials for SMT task.
+    """
+    plt.plot(np.arange(dorm_frequency.shape[0]), dorm_frequency)
+    plt.show()
+
+
 
 if __name__ == "__main__":
     from replay.local_path import f1

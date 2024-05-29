@@ -1,7 +1,8 @@
 from moviepy.editor import VideoFileClip, AudioFileClip
 import numpy as np
 import os
-from scipy.fft import rfft, rfftfreq
+import librosa
+from scipy.fft import rfftfreq
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
@@ -15,8 +16,6 @@ def read_audio(
     # Read audio from video
     video = VideoFileClip(f_dir)
     audio = video.audio
-
-    print(video.duration, video.duration*video.fps, audio.fps)
 
     # Convert to array
     audio_array = audio.to_soundarray()
@@ -44,108 +43,6 @@ def read_audio(
         "video_fps": video_fps,
         "video_frames": video_frames
     }
-
-def fourier_transform(
-    audio_array: np.ndarray,
-    fps: int = 44100,
-    n: int = 4096,
-    fft_kwargs: dict = {}
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Convert single-channel audio to frequency information using FFT.
-
-    Parameters
-    ----------
-    audio_array : np.ndarray
-        A 1D numpy array containing the audio samples from the single-channel
-          audio.
-    fps : int
-        The frames per second (sampling rate) of the audio in Hz (e.g., 44100
-          for CD-quality audio).
-    n : int, optional
-        The number of time bins for FFT. By default 2048.
-    fft_kwargs : dict
-        Additional keyword arguments to pass to the `fft` function.
-
-    Returns
-    -------
-    frequencies : np.ndarray
-        A 1D numpy array containing the positive frequency components in Hz.
-    magnitudes : np.ndarray
-        A 1D numpy array containing the magnitude of each frequency component.
-    
-    Notes
-    -----
-    The Fast Fourier Transform (FFT) is used to convert the time-domain audio
-      signal into the frequency domain. The magnitude of the FFT represents 
-      the amplitude of each frequency component present in the audio signal.
-    
-    Example
-    -------
-    >>> audio_array = np.array([0.0, 0.1, 0.0, -0.1])
-    >>> fps = 44100
-    >>> frequencies, magnitudes = fourier_transform(audio_array, fps)
-    >>> print(frequencies)
-    [0.0, 11025.0, 22050.0]
-    >>> print(magnitudes)
-    [0.0, 0.1, 0.2]
-    """
-    # Perform FFT
-    yf = rfft(audio_array, n = n, **fft_kwargs)
-    xf = rfftfreq(n, 1 / fps)
-    return xf, yf
-
-def stft(
-    audio: np.ndarray,
-    duration: float,
-    targ_frames: int,
-    fps: int = 44100,
-    n: int = 4096,
-    fft_kwargs: dict = {}
-) -> np.ndarray:
-    """
-    Perform Short-Time Fourier Transform (STFT) on the audio array.
-
-    Parameters
-    ----------
-    audio_array : np.ndarray
-        An 1D numpy array containing the audio samples from the single-channel
-        audio.
-    duration : float
-        The duration of the audio in seconds.
-    targ_frames : int
-        The number of time bins for STFT.
-    fps : int
-        The frames per second (sampling rate) of the audio in Hz.
-
-    Returns
-    -------
-    times : np.ndarray
-        A 1D numpy array containing the time points for each window in seconds.
-    frequencies : np.ndarray
-        A 1D numpy array containing the frequency components in Hz.
-    magnitudes : np.ndarray
-        A 2D numpy array where each row corresponds to the magnitude of each 
-        frequency component for a given window.
-    """
-    N = int(n / 2) + 1
-    audio_time = np.linspace(0, duration, audio.shape[0]+1)[:-1]
-    downsampled_time = np.linspace(0, duration, targ_frames+1)
-    magnitudes = np.zeros((N, targ_frames), dtype=np.float64)
-    frequencies = rfftfreq(n, 1 / fps)
-
-    print("Short-time Fast Fourier Transformation Started:")
-    for i in tqdm(range(targ_frames)):
-        idx = np.where(
-            (downsampled_time[i] <= audio_time) & 
-            (audio_time < downsampled_time[i+1])
-        )[0]
-        windowed_signal = audio[idx]
-
-        # Perform FFT
-        magnitudes[:, i] = np.abs(rfft(windowed_signal, n = n, **fft_kwargs))
-
-    return downsampled_time, frequencies, magnitudes
 
 def sliding_stft(
     audio: np.ndarray,
@@ -177,8 +74,6 @@ def sliding_stft(
 
     Returns
     -------
-    times : np.ndarray
-        A 1D numpy array containing the time points for each window in seconds.
     frequencies : np.ndarray
         A 1D numpy array containing the frequency components in Hz.
     magnitudes : np.ndarray
@@ -186,23 +81,40 @@ def sliding_stft(
         frequency component for a given window.
     """
     N = int(n / 2) + 1
-    audio_time = np.linspace(0, duration, audio.shape[0]+1)[:-1]
-    downsampled_time = np.linspace(0, duration, targ_frames+1)
-    magnitudes = np.zeros((N, targ_frames), dtype=np.float64)
     frequencies = rfftfreq(n, 1 / fps)
 
-    print("Short-time Fast Fourier Transformation Started:")
-    for i in tqdm(range(targ_frames)):
-        idx = np.where(
-            (downsampled_time[i] - t_window <= audio_time) & 
-            (audio_time < downsampled_time[i] + t_window)
-        )[0]
-        windowed_signal = audio[idx]
+    magnitudes = librosa.stft(
+        audio, 
+        n_fft=n, 
+        hop_length=int(audio.shape[0] / targ_frames), 
+        **fft_kwargs
+    )
+    magnitudes = np.abs(magnitudes)
+    return frequencies, magnitudes[:, :targ_frames]
 
-        # Perform FFT
-        magnitudes[:, i] = np.abs(rfft(windowed_signal, n = n, **fft_kwargs))
+def remove_background_noise(
+    magnitudes: np.ndarray, 
+    background_noise: np.ndarray
+) -> np.ndarray:
+    """
+    Remove the background noise from the audio signal.
 
-    return downsampled_time[:-1], frequencies, magnitudes
+    Notes
+    -----
+    Background noise was generated in advance.
+    """
+    magnitudes = magnitudes - background_noise[:, np.newaxis]
+    magnitudes[magnitudes < 0] = 0
+
+    # Normalize across axis 0
+    magnitudes = magnitudes / np.max(magnitudes, axis=0)
+    return magnitudes
+
+def get_dominant_frequency(magnitudes: np.ndarray) -> np.ndarray:
+    """
+    Get the dominant frequency from the audio signal.
+    """
+    return np.argmax(magnitudes, axis=0)+1
 
 if __name__ == "__main__":
     import pickle
@@ -211,7 +123,7 @@ if __name__ == "__main__":
     
     audio = read_audio(dir_name)
     """
-    downsampled_time, frequencies, magnitudes = sliding_stft(
+    frequencies, magnitudes = sliding_stft(
         audio['audio'], 
         duration = audio['duration'],# 1800.19, 
         targ_frames = audio['video_frames'], #54005,
@@ -239,7 +151,7 @@ if __name__ == "__main__":
     from replay.preprocess.behav import read_dlc, process_dlc, get_reward_info
     dir_name = r"E:\behav\SMT\27049\20220516"
     dlc_data = read_dlc(dir_name)
-    trace = process_dlc(dlc_data)       
+    trace = process_dlc(dlc_data)
 
     is_press = trace['is_press']
     time = audio['video_time']
@@ -249,10 +161,16 @@ if __name__ == "__main__":
     reward_time2 = get_reward_info(dir_name, '液体输出')
     reward_time3 = get_reward_info(dir_name, '饮水')
 
-    plt.plot(reward_time1, np.repeat(1600, len(reward_time1)), 'o')
-    plt.plot(reward_time2, np.repeat(1400, len(reward_time2)), 'o')
-    plt.plot(reward_time3, np.repeat(1200, len(reward_time3)), 'o')
+    plt.figure()
+    ax = plt.axes()
+    plt.imshow(magnitudes, cmap='hot', interpolation='nearest')
+    plt.plot(reward_time1, np.repeat(340, len(reward_time1)), 'o')
+    plt.plot(reward_time2, np.repeat(320, len(reward_time2)), 'o')
+    plt.plot(reward_time3, np.repeat(300, len(reward_time3)), 'o')
     print(is_press, np.sum(is_press))
-    plt.plot(time[np.where(is_press == 1)[0]], np.repeat(1800, np.sum(is_press)), 'o')
-    plt.plot(time, dominant_freq[:-1])
+    x = np.arange(magnitudes.shape[1])
+    plt.plot(x, dominant_freq / 22050 * 256, color = 'yellow')
+    plt.plot(time[np.where(is_press == 1)[0]], np.repeat(280, np.sum(is_press)), 'o')
+    #plt.plot(time, dominant_freq[:-1])
+    ax.set_aspect('auto')
     plt.show()
