@@ -12,6 +12,9 @@ def read_audio(
 ) -> dict:
     """Read the audio from behavioral video"""
     f_dir = os.path.join(dir_name, file_name)
+    if os.path.exists(f_dir) == False:
+        file_name = "video.avi"
+        f_dir = os.path.join(dir_name, file_name)
 
     # Read audio from video
     video = VideoFileClip(f_dir)
@@ -116,37 +119,27 @@ def get_dominant_frequency(magnitudes: np.ndarray) -> np.ndarray:
     """
     return np.argmax(magnitudes, axis=0)+1
 
+
 if __name__ == "__main__":
     import pickle
     
     dir_name = r"E:\behav\SMT\27049\20220516"
     
     audio = read_audio(dir_name)
-    """
+
     frequencies, magnitudes = sliding_stft(
         audio['audio'], 
         duration = audio['duration'],# 1800.19, 
         targ_frames = audio['video_frames'], #54005,
         n = 512
     )
-    dominant_freq = frequencies[np.argmax(magnitudes, axis=0)]
 
-    with open(os.path.join(dir_name, r"temp3.pkl"), "wb") as f:
-        pickle.dump([downsampled_time, frequencies, magnitudes], f)
-    """
-    with open(os.path.join(dir_name, r"temp3.pkl"), "rb") as f:
-        downsampled_time, frequencies, magnitudes = pickle.load(f)
+    with open(r"E:\behav\background_noise.pkl", "rb") as f:
+        background_noise = pickle.load(f)
 
-    print(magnitudes.shape, frequencies.shape)
-
-    magnitudes = np.abs(magnitudes)
-    magnitudes = magnitudes / np.max(magnitudes, axis=0)    
-    power = magnitudes ** 2
-    power = power[frequencies > 2000, :]
-    frequencies = frequencies[frequencies > 2000]
-    dominant_freq = frequencies[np.argmax(power, axis=0)]
-    
-    print(np.min(magnitudes), np.max(magnitudes), frequencies.shape)
+    #magnitudes = remove_background_noise(magnitudes, background_noise)
+    dominant_freq = get_dominant_frequency(magnitudes)
+    dominant_freq[dominant_freq <= 23] = 0
 
     from replay.preprocess.behav import read_dlc, process_dlc, get_reward_info
     dir_name = r"E:\behav\SMT\27049\20220516"
@@ -157,19 +150,14 @@ if __name__ == "__main__":
     time = audio['video_time']
 
     # reward
-    reward_time1 = get_reward_info(dir_name, '液体奖励')
-    reward_time2 = get_reward_info(dir_name, '液体输出')
-    reward_time3 = get_reward_info(dir_name, '饮水')
+    reward_time = get_reward_info(dir_name)
 
     plt.figure()
     ax = plt.axes()
     plt.imshow(magnitudes, cmap='hot', interpolation='nearest')
-    plt.plot(reward_time1, np.repeat(340, len(reward_time1)), 'o')
-    plt.plot(reward_time2, np.repeat(320, len(reward_time2)), 'o')
-    plt.plot(reward_time3, np.repeat(300, len(reward_time3)), 'o')
-    print(is_press, np.sum(is_press))
+    plt.plot(reward_time, np.repeat(300, len(reward_time)), 'o')
     x = np.arange(magnitudes.shape[1])
-    plt.plot(x, dominant_freq / 22050 * 256, color = 'yellow')
+    plt.plot(x, dominant_freq-1 , color = 'yellow')
     plt.plot(time[np.where(is_press == 1)[0]], np.repeat(280, np.sum(is_press)), 'o')
     #plt.plot(time, dominant_freq[:-1])
     ax.set_aspect('auto')

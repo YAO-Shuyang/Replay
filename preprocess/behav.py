@@ -87,7 +87,7 @@ def process_dlc(dlc_data: dict) -> dict:
 
 def read_behav(
     dir_name: str, 
-    file_name: Optional[str] = None,
+    file_name: str = "READY.xlsx",
     **kwargs
 ) -> pd.DataFrame:
     """
@@ -107,20 +107,9 @@ def read_behav(
     pd.DataFrame
         behavior data
     """
-    if file_name is None:
-        # find files whose name contain "READY.xlsx"
-        files = [f for f in os.listdir(dir_name) if "READY.xlsx" in f]
-        if len(files) == 0:
-            raise FileNotFoundError(f"Fail to find READY.xlsx in {dir_name}")
-        elif len(files) > 1:
-            raise Exception(
-                f"Found more than one READY.xlsx in {dir_name}:\n"
-                f"{files}"
-            )
-        else:
-            file_name = files[0]
- 
     f_dir = os.path.join(dir_name, file_name)
+    if not os.path.exists(f_dir):
+        raise FileNotFoundError(f"Fail to find {f_dir}")
     return pd.read_excel(f_dir, **kwargs)
 
 def transform_time_format(time_stamp: np.ndarray) -> np.ndarray:
@@ -199,7 +188,6 @@ def identify_trials_SMT(
     """
     plt.plot(np.arange(dorm_frequency.shape[0]), dorm_frequency)
     plt.show()
-
 
 
 if __name__ == "__main__":
