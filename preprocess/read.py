@@ -4,44 +4,6 @@ import os
 import json
 from typing import Optional
 
-def read_behav(
-    dir_name: str, 
-    file_name: Optional[str] = None,
-    **kwargs
-) -> pd.DataFrame:
-    """
-    read behavior excel sheet
-
-    Parameters
-    ----------
-    dir_name : str
-        Directory of behavior data
-    file_name : str
-        File name of behavior data
-    kwargs : dict
-        Additional arguments for pd.read_excel
-
-    Returns
-    -------
-    pd.DataFrame
-        behavior data
-    """
-    if file_name is None:
-        # find files whose name contain "READY.xlsx"
-        files = [f for f in os.listdir(dir_name) if "READY.xlsx" in f]
-        if len(files) == 0:
-            raise FileNotFoundError(f"Fail to find READY.xlsx in {dir_name}")
-        elif len(files) > 1:
-            raise Exception(
-                f"Found more than one READY.xlsx in {dir_name}:\n"
-                f"{files}"
-            )
-        else:
-            file_name = files[0]
- 
-    f_dir = os.path.join(dir_name, file_name)
-    return pd.read_excel(f_dir, **kwargs)
-
 def read_brain_region(
     dir_name: str,
     n_neuron: int, 

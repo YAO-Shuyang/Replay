@@ -5,6 +5,7 @@ import librosa
 from scipy.fft import rfftfreq
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import copy as cp
 
 def read_audio(
     dir_name: str, 
@@ -12,6 +13,7 @@ def read_audio(
 ) -> dict:
     """Read the audio from behavioral video"""
     f_dir = os.path.join(dir_name, file_name)
+
     if os.path.exists(f_dir) == False:
         file_name = "video.avi"
         f_dir = os.path.join(dir_name, file_name)
@@ -95,6 +97,24 @@ def sliding_stft(
     magnitudes = np.abs(magnitudes)
     return frequencies, magnitudes[:, :targ_frames]
 
+def get_background_noise(
+    audio: np.ndarray,
+    range: tuple[int, int],
+    n: int = 512,
+    **fft_kwargs
+) -> np.ndarray:
+    """
+    Input a piece of pure background noise
+    """
+    noise_magnitudes = librosa.stft(
+        audio, 
+        n_fft=n,
+        **fft_kwargs
+    )
+    noise_magnitudes = np.abs(noise_magnitudes)
+    noise_magnitudes = np.percentile(noise_magnitudes, 90, axis=1)
+    return noise_magnitudes
+
 def remove_background_noise(
     magnitudes: np.ndarray, 
     background_noise: np.ndarray
@@ -117,48 +137,65 @@ def get_dominant_frequency(magnitudes: np.ndarray) -> np.ndarray:
     """
     Get the dominant frequency from the audio signal.
     """
-    return np.argmax(magnitudes, axis=0)+1
+    return np.argmax(magnitudes, axis=0)
 
 
 if __name__ == "__main__":
     import pickle
     
-    dir_name = r"E:\behav\SMT\27049\20220516"
+    from replay.preprocess.behav import identify_trials
+    dir_name = r"E:\behav\SMT\27049\20220516\session 1"
     
     audio = read_audio(dir_name)
 
+    audio_conv = audio['audio']
+
     frequencies, magnitudes = sliding_stft(
-        audio['audio'], 
+        audio_conv, 
         duration = audio['duration'],# 1800.19, 
         targ_frames = audio['video_frames'], #54005,
         n = 512
     )
+    ori_magnitudes = cp.deepcopy(magnitudes)
+    
+    ratio = audio['audio_fps'] / audio['video_fps']
+    background_noise = get_background_noise(
+        audio_conv, 
+        range = (int(43000 * ratio), int(45500 * ratio)),#(int(31200 * ratio), int(33700 * ratio)), 
+        n = 512
+    )
+    
+    magnitudes = remove_background_noise(magnitudes, background_noise)
 
-    with open(r"E:\behav\background_noise.pkl", "rb") as f:
-        background_noise = pickle.load(f)
-
-    #magnitudes = remove_background_noise(magnitudes, background_noise)
     dominant_freq = get_dominant_frequency(magnitudes)
-    dominant_freq[dominant_freq <= 23] = 0
+    magnitudes = magnitudes / np.max(magnitudes, axis=0)
 
-    from replay.preprocess.behav import read_dlc, process_dlc, get_reward_info
-    dir_name = r"E:\behav\SMT\27049\20220516"
-    dlc_data = read_dlc(dir_name)
-    trace = process_dlc(dlc_data)
+    from replay.preprocess.behav import read_dlc, process_dlc, get_reward_info, get_lever_event, coordinate_event_behav
+    releasing_time = get_lever_event(dir_name)
+    is_releasing = coordinate_event_behav(releasing_time, audio['video_time'])
 
-    is_press = trace['is_press']
-    time = audio['video_time']
+    lever = process_dlc(read_dlc(dir_name))
+    is_press = lever['is_press']
 
     # reward
-    reward_time = get_reward_info(dir_name)
+    #reward_time = get_reward_info(dir_name)
 
+    onset, end, dominant_freq_filtered, end_freq = identify_trials(cp.deepcopy(dominant_freq))
+
+    idx = np.where(dominant_freq_filtered != 0)[0]
+    
+    print(onset.shape)
     plt.figure()
     ax = plt.axes()
     plt.imshow(magnitudes, cmap='hot', interpolation='nearest')
-    plt.plot(reward_time, np.repeat(300, len(reward_time)), 'o')
     x = np.arange(magnitudes.shape[1])
-    plt.plot(x, dominant_freq-1 , color = 'yellow')
-    plt.plot(time[np.where(is_press == 1)[0]], np.repeat(280, np.sum(is_press)), 'o')
+    #plt.plot(x, dominant_freq , color = 'green', alpha = .5)
+    idx = np.where(is_releasing == 1)[0]
+    plt.plot(x[idx], is_releasing[idx]-2,'o', markeredgewidth = 0, markersize = 6)
+    dp = np.ediff1d(is_press)
+    idx = np.where(dp == -1)[0]
+    plt.plot(x[idx], is_press[idx], 'o', markeredgewidth = 0, markersize = 6)
+    plt.plot(x, dominant_freq_filtered , color = 'yellow')
     #plt.plot(time, dominant_freq[:-1])
     ax.set_aspect('auto')
     plt.show()
