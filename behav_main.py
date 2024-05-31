@@ -49,6 +49,9 @@ def run_all_sessions(
     magnitudes = remove_background_noise(magnitudes, background_noise)
     power = magnitudes ** 2
     behav_freq = get_dominant_frequency(magnitudes, frequencies)
+    
+    # Identify Trials
+    print()
     trace.update({
         'frequencies': frequencies, 
         'magnitudes': magnitudes,
