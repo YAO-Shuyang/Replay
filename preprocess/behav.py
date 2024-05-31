@@ -1,6 +1,6 @@
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Union
 import pandas as pd
 import os
 import matplotlib.pyplot as plt
@@ -153,18 +153,30 @@ def transform_time_format(time_stamp: np.ndarray) -> np.ndarray:
     return converted_time.astype(np.float64)
 
 def find_freq_bin(
-    freq: float | np.ndarray,
-    frequences: np.ndarray
-) -> int:
+    freq: Union[float, np.ndarray],
+    frequencies: np.ndarray
+) -> Union[int, np.ndarray]:
     """
     Get the bin ID for input frequency
+
+    Parameters
+    ----------
+    freq : float | np.ndarray
+        The frequency or frequencies to be converted.
+    frequencies : np.ndarray
+        The frequency centers for each freq bin.
+
+    Returns
+    -------
+    int | np.ndarray
+        The bin ID(s)
     """
     if isinstance(freq, float):
-        df = np.abs(frequences - freq)
+        df = np.abs(frequencies - freq)
         return np.argmin(df)
     else:
-        freqs = np.repeat(frequences[np.newaxis, :], freq.shape[0], axis = 0)
-        df = np.abs(freqs - freq)
+        freqs = np.repeat(frequencies[np.newaxis, :], freq.shape[0], axis = 0)
+        df = np.abs(freqs - freq[:, np.newaxis])
         return np.argmin(df, axis = 1)
 
 def get_freqseq_info(
@@ -175,18 +187,20 @@ def get_freqseq_info(
 ) -> np.ndarray:
     """Get the last freq time stamp and freq."""
     f = read_behav(dir_name=dir_name, sheet_name = "Frequency")
-    events = np.where(f['事件'] == "声音播放", 0, 1)[0]
-    transitions = np.ediff1d(events)
+    events = np.where(f['事件'] == "声音播放", 0, 1)
+    transitions = np.append(np.ediff1d(events), -1)
 
-    final_freq_idx = np.where(transitions == -1)[0][0]
-    final_freq = f['频率'][final_freq_idx]
+    final_freq_idx = np.where(transitions == -1)[0]
+    final_freq = np.array(f['频率'][final_freq_idx], dtype=np.float64)
+
+    freq_time = transform_time_format(np.array(f['测试时间'])[final_freq_idx])
 
     if frequencies is None:
         frequencies = rfftfreq(n = n_fft, d = 1 / fps)
 
-    final_freq = find_freq_bin(final_freq, frequencies = frequencies, fps = fps)
+    final_freq = find_freq_bin(final_freq, frequencies = frequencies)
 
-    return transform_time_format(f['测试时间'][final_freq]), f['频率'][final_freq]
+    return freq_time, final_freq
 
 def get_reward_info(dir_name: str) -> np.ndarray:
     """
@@ -234,16 +248,11 @@ def coordinate_event_behav(
     here.
     """
     is_events = np.zeros(len(video_time), dtype = np.int64)
-    for t in event_time:
-        bef_idx = np.where(video_time >= t)[0][0] if t <= video_time[-1] else video_time.shape[0]-1
-        aft_idx = np.where(video_time <= t)[0][-1] if t >= video_time[0] else 0
 
-        bef_t, aft_t = video_time[bef_idx], video_time[aft_idx]
-
-        if np.abs(t - bef_t) < np.abs(t - aft_t):
-            is_events[bef_idx] = 1
-        else:
-            is_events[aft_idx] = 1
+    arr = np.repeat(video_time[np.newaxis, :], event_time.shape[0], axis = 0)
+    diff = np.abs(arr - event_time[:, np.newaxis])
+    frames = np.argmin(diff, axis = 1)
+    is_events[frames] = 1
 
     return is_events
 
@@ -287,6 +296,7 @@ def _search_trial_ends(
     plt.xlabel("Frame")
     plt.show()
     raise Exception(f"Fail to find trial end, onset frame: {onset_frame}")
+
 
 def _merge_trials(
     onset_frame: int,
@@ -357,6 +367,147 @@ def identify_trials(
         if (dominant_freq[end_frame] < dominant_freq[end_frame-1] -2 or
             dominant_freq[end_frame] > dominant_freq[end_frame-1] + 2):
             end_frame -= 1
+
+        gap_idx = end_frame + 1
+
+        curr_freq = dominant_freq[onset_frame]
+        end_freq = dominant_freq[end_frame]
+        prev_freq = end_freqs[-1] if len(end_freqs) > 0 else np.nan
+            
+        # Check if this trial should be merged with the prior one.
+        if len(end_freqs) == 0:
+            if curr_freq == freq_thre and end_freq != freq_thre:
+                onset_frames.append(onset_frame)
+                end_frames.append(end_frame)
+                end_freqs.append(end_freq)
+        else:
+            BEYOND_INTERVAL = end_frame - end_frames[-1] > 5
+            SHOULD_MERGE = (
+                (curr_freq >= prev_freq and curr_freq < 1.4 * prev_freq) or
+                (curr_freq < prev_freq and 
+                 curr_freq in dominant_freq[onset_frames[-1]:end_frames[-1]+1] and
+                 curr_freq != freq_thre)
+            )
+                            
+            if BEYOND_INTERVAL or not SHOULD_MERGE:
+                if dominant_freq[onset_frame] == freq_thre and end_freq != freq_thre:
+                    onset_frames.append(onset_frame)
+                    end_frames.append(end_frame)
+                    end_freqs.append(dominant_freq[end_frame])
+            elif not BEYOND_INTERVAL and SHOULD_MERGE:
+                dominant_freq = _merge_trials(
+                    onset_frame = onset_frames[-1],
+                    end_frame = end_frame,
+                    dominatant_freq = dominant_freq
+                )
+                end_frames.pop()
+                end_freqs.pop()
+                end_frames.append(end_frame)
+                end_freqs.append(dominant_freq[end_frame])
+            
+    dominant_freq_filtered = np.zeros_like(dominant_freq)
+    for i in range(len(onset_frames)):
+        onset, end = onset_frames[i], end_frames[i]
+        dominant_freq_filtered[onset:end+1] = dominant_freq[onset:end+1]
+
+    onset_frames = np.array(onset_frames, dtype = np.int64)
+    end_frames = np.array(end_frames, dtype = np.int64)
+    end_freqs = np.array(end_freqs, dtype = np.int64)
+    
+    return onset_frames, end_frames, dominant_freq_filtered, end_freqs
+
+def _search_trial_ends2(
+    onset_frame: int,
+    dominant_freq: np.ndarray,
+    time_indicator: np.ndarray,
+    freq_thre: int = 23
+) -> tuple[int, np.ndarray]:
+    """
+    If frequency resets to
+    """
+    # The latest indicator frame, any reset detected after this frame
+    # will be regarded as the end of the trial
+    try:
+        latest_indicator_frame = onset_frame + np.where(
+            time_indicator[onset_frame:] == 1
+        )[0][0]
+    except:
+        return onset_frame, dominant_freq
+
+    for i in range(onset_frame, dominant_freq.shape[0]-1):
+        if i < latest_indicator_frame:
+            if dominant_freq[i+1] < max(dominant_freq[i] - 2, freq_thre):
+                dominant_freq[i+1] = dominant_freq[i]
+            elif dominant_freq[i+1] > dominant_freq[i] * 1.4:
+                dominant_freq[i+1] = dominant_freq[i]
+        else:
+            if (dominant_freq[i+1] < max(dominant_freq[i] - 2, freq_thre) or
+                 dominant_freq[i+1] > dominant_freq[i] * 1.4):
+                return i, dominant_freq
+
+    plt.figure()
+    plt.plot(np.arange(onset_frame, dominant_freq.shape[0]), dominant_freq[onset_frame:])
+    plt.title("Failure in identifying the trial ends")
+    plt.xlabel("Frame")
+    plt.show()
+    raise Exception(f"Fail to find trial end, onset frame: {onset_frame}")
+
+def identify_trials2(
+    dominant_freq: np.ndarray,
+    time_indicator: np.ndarray,
+    freq_thre: int = 23
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Identify trials for SMT task.
+
+    Parameters
+    ----------
+    dominant_freq : np.ndarray
+        The real-time dominant frequency, represented as freq bin ID.
+        (0 to 256 representing 0Hz to 22050Hz)
+    time_indicator : np.ndarray
+        The time indicator for each trial.
+    freq_thre : int
+        Threshold to identify the onset of a trial (default: 23).
+        2 kHz belongs to freq bin 23.
+
+    Returns
+    -------
+    onset_frames : np.ndarray
+        The onset frames of each trial.
+    end_frames : np.ndarray
+        The end frames of each trial.
+    dominant_freq_filtered : np.ndarray
+        The filtered dominant frequency.
+    end_freq : np.ndarray
+        The end frequency of each trial.
+    """
+    onset_frames = []
+    end_frames = []
+    end_freqs = []
+    
+    # Get onset frames 
+    # Onset was defined as three successive frames with dominant frequency
+    # equaling to threshold, i.e. 2 kHz
+    dfreq = np.append(np.ediff1d(dominant_freq), -1)
+    onset_idx = np.where((dominant_freq >= freq_thre) & (dfreq == 0))[0]
+
+    gap_idx = 0
+    for i in tqdm(onset_idx):
+        if i < gap_idx:
+            continue
+
+        if dominant_freq[i] == freq_thre and i+1 not in onset_idx:
+            continue
+
+        # Consecutive 2 frames equal to 2 kHz
+        onset_frame = i
+        end_frame, dominant_freq = _search_trial_ends2(
+            onset_frame = i, 
+            dominant_freq = dominant_freq,
+            time_indicator = time_indicator,
+            freq_thre = freq_thre
+        )
 
         gap_idx = end_frame + 1
 
