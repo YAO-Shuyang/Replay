@@ -142,8 +142,11 @@ def get_dominant_frequency(magnitudes: np.ndarray) -> np.ndarray:
 
 if __name__ == "__main__":
     import pickle
-    
-    from replay.preprocess.behav import identify_trials
+    from replay.preprocess.behav import (
+        read_dlc, process_dlc, get_reward_info, get_lever_event, 
+        coordinate_event_behav
+    )
+    from replay.preprocess.behav import identify_trials2, get_freqseq_info
     dir_name = r"E:\behav\SMT\27049\20220516\session 1"
     
     audio = read_audio(dir_name)
@@ -166,11 +169,13 @@ if __name__ == "__main__":
     )
     
     magnitudes = remove_background_noise(magnitudes, background_noise)
+    final_freq_time, dominant_freq = get_freqseq_info(dir_name, frequencies=frequencies)
+    time_indicator = coordinate_event_behav(final_freq_time, audio['video_time'])
 
     dominant_freq = get_dominant_frequency(magnitudes)
     magnitudes = magnitudes / np.max(magnitudes, axis=0)
 
-    from replay.preprocess.behav import read_dlc, process_dlc, get_reward_info, get_lever_event, coordinate_event_behav
+    
     releasing_time = get_lever_event(dir_name)
     is_releasing = coordinate_event_behav(releasing_time, audio['video_time'])
 
@@ -179,8 +184,11 @@ if __name__ == "__main__":
 
     # reward
     #reward_time = get_reward_info(dir_name)
-
-    onset, end, dominant_freq_filtered, end_freq = identify_trials(cp.deepcopy(dominant_freq))
+    print(time_indicator, time_indicator.shape)
+    onset, end, dominant_freq_filtered, end_freq = identify_trials2(
+        dominant_freq=cp.deepcopy(dominant_freq),
+        time_indicator=cp.deepcopy(time_indicator),
+    )
 
     idx = np.where(dominant_freq_filtered != 0)[0]
     
