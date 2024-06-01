@@ -1,20 +1,22 @@
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout
 from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QLineEdit, QLabel
 from PyQt6.QtWidgets import QFileDialog, QMessageBox, QSpinBox, QCheckBox
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer, QEvent
 import sys
 
 import os
+import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import time
 import copy as cp
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
 from replay.gui.behav_func import run_section_one, run_section_two, save_trace
 from replay.preprocess.frequency import correct_freq, display_spectrum, reset_freq
-from replay.preprocess.frequency import get_background_noise
+from replay.preprocess.frequency import get_background_noise, filter_freq, update_end_freq
 from replay.gui.arrowspinbox import ArrowSpinBox
 
 class MainWindow(QMainWindow):
@@ -31,6 +33,10 @@ class MainWindow(QMainWindow):
         self._init_line = 0
 
         self._modify_frame_gate = False
+        self.left_buffer = []
+        self.right_buffer = []
+
+        self.is_gap_noiseprocess = False
 
         self.setWindowTitle("Process Frequency Sequence")
         self.setGeometry(100, 100, 1400, 600)
@@ -111,10 +117,14 @@ class MainWindow(QMainWindow):
         self.next_button = QPushButton("Next")
         self.next_button.clicked.connect(self.confirm_next)
         self.next_button.setEnabled(False)
+        self.update_button = QPushButton("Update Frequency")
+        self.update_button.clicked.connect(self.update_dominant_freq)
+        self.update_button.setEnabled(False)
         modifyLayout = QHBoxLayout()
         modifyLayout.addWidget(self.insert_button, 1)
         modifyLayout.addWidget(self.delete_button, 1)
         modifyLayout.addWidget(self.next_button, 1)
+        modifyLayout.addWidget(self.update_button, 2)
         self.leftLayout.addLayout(modifyLayout)
 
         # Insert Line
@@ -188,6 +198,8 @@ class MainWindow(QMainWindow):
         self.main_layout.addLayout(leftColumn, 1)
         self.main_layout.addLayout(self.rightLayout, 2)
 
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+
     def load_excel(self):
         self.reset_varaibles()
         file_path, _ = QFileDialog.getOpenFileName(
@@ -231,6 +243,12 @@ class MainWindow(QMainWindow):
         else:
             self._line_range = (self._init_line, self._init_line+1)
 
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Right:
+            self.trial_id.stepUp()
+        elif event.key() == Qt.Key.Key_Left:
+            self.trial_id.stepDown()
+
     def reset_varaibles(self):
         self.curr_trace = None
         self.curr_trial = None
@@ -239,6 +257,9 @@ class MainWindow(QMainWindow):
         self._frames = None
         self._endfreq = None
         self._modify_frame_gate = False
+        self.left_buffer = []
+        self.right_buffer = []
+        self.is_gap_noiseprocess = False
 
         self.trial_id.setEnabled(False)
         self.onset_frame.setEnabled(False)
@@ -251,9 +272,12 @@ class MainWindow(QMainWindow):
         self.insert_button.setEnabled(False)
         self.delete_button.setEnabled(False)
         self.next_button.setEnabled(False)
+        self.update_button.setEnabled(False)
 
         self.left_ax.clear()
+        self.browse_spectrum.draw()
         self.right_ax.clear()
+        self.trial_spectrum.draw()
 
         self.insert_start_selector.setEnabled(False)
         self.insert_end_selector.setEnabled(False)
@@ -263,124 +287,104 @@ class MainWindow(QMainWindow):
             return
         
         if self._process_line <= self._line_range[1]:
-            self.curr_trace = run_section_one(self.f_data, self._process_line)
+            file_name = os.path.join(
+                self.f_data['recording_folder'][self._process_line],
+                "trace_behav.pkl"
+            )
+            if os.path.exists(file_name):
+                with open(file_name, 'rb') as handle:
+                    self.curr_trace = pickle.load(handle)
 
-            # noise process
-            self._enter_noise_process = True
-            self.noise_start_selector.setEnabled(True)
-            self.noise_start_selector.setRange(
-                0, self.curr_trace['magnitudes'].shape[1]-100
-            )
-            self.noise_end_selector.setEnabled(True)
-            self.noise_end_selector.setRange(
-                100, self.curr_trace['magnitudes'].shape[1]-1
-            )
-            self.noise_end_selector.setValue(100)
-            self.set_noise_range.setEnabled(True)
+    
+                print(
+                    f"{self._process_line}  Mouse {self.curr_trace['mouse']} "
+                    f"{self.curr_trace['date']} {self.curr_trace['paradigm']}"
+                    f"-----------------------"
+                )
+                print(f"  {file_name} loaded.")
 
-            self.left_ax.clear()
-            self.left_ax = display_spectrum(
-                self.left_ax,
-                magnitudes=self.curr_trace['magnitudes'],
-                freq_range=(0, 257),
-                frame_range=(0, self.curr_trace['magnitudes'].shape[1]-1)
-            )
-            self.browse_spectrum.draw()
+                if "background_noise" in self.curr_trace.keys():
+                    self.is_gap_noiseprocess = True
+                    self.process_noise()
+            else:
+                self.curr_trace = run_section_one(self.f_data, self._process_line)
+
+            if self.is_gap_noiseprocess == False:
+                # noise process
+                self._enter_noise_process = True
+                self.noise_start_selector.setEnabled(True)
+                self.noise_start_selector.setRange(
+                    0, self.curr_trace['magnitudes'].shape[1]-100
+                )
+                self.noise_end_selector.setEnabled(True)
+                self.noise_end_selector.setRange(
+                    100, self.curr_trace['magnitudes'].shape[1]-1
+                )
+                self.noise_end_selector.setValue(100)
+                self.set_noise_range.setEnabled(True)
+
+                self.left_ax.clear()
+                self.left_ax = display_spectrum(
+                    self.left_ax,
+                    magnitudes=self.curr_trace['magnitudes'],
+                    freq_range=(0, 257),
+                    frame_range=(0, self.curr_trace['magnitudes'].shape[1]-1)
+                )
+                self.browse_spectrum.draw()
         else:
             QMessageBox.information(self, "Info", "All sessions have been processed.")
 
-    def update_noise_spectrum(self):
-        
-        if self.noise_start_selector.value() + 100 > self.noise_end_selector.value():
-            return
-
-        lef, rig = self.noise_start_selector.value(), self.noise_end_selector.value()
-        self.left_ax.clear()
-        self.left_ax = display_spectrum(
-            self.left_ax,
-            magnitudes=self.curr_trace['magnitudes'],
-            freq_range=(0, 257),
-            frame_range=(lef - 100, rig + 100)
-        )
-        self.left_ax.axvline(lef, color = 'blue')
-        self.left_ax.axvline(rig, color = 'blue')
-        self.browse_spectrum.draw()
-
-        self.f_data.loc[self._process_line, 'noise start'] = lef
-        self.f_data.loc[self._process_line, 'noise end'] = rig
-
-        self.f_data.to_excel(self.f_data_savedir, index=False)
-
-    def update_insert_spectrum(self):
-        if self.insert_start_selector.value() >= self.insert_end_selector.value():
-            return
-
-        lef, rig = self.insert_start_selector.value(), self.insert_end_selector.value()
-        
-        self.left_ax.clear()
-        self.left_ax = display_spectrum(
-            self.left_ax,
-            magnitudes=self.curr_trace['magnitudes'],
-            freq_range=(20, 180),
-            frame_range=(lef-10, rig+10),
-            dominant_freq=self.curr_trace['dominant_freq_filtered']
-        )
-        self.left_ax.axvline(lef, color = 'blue')
-        self.left_ax.axvline(rig, color = 'blue')
-        self.left_ax.axhline(23, color = 'white', linewidth = 0.3)
-        self.left_ax.axhline(174, color = 'white', linewidth = 0.3)
-        self.browse_spectrum.draw()
-
-
-    def update_spectrum(self):
-        if self.end_frame.value() < self.onset_frame.value():
-            return
-
-        self.right_ax.clear()
-        onset, end = self.onset_frame.value(), self.end_frame.value()
-        self.right_ax = display_spectrum(
-            self.right_ax,
-            magnitudes=self.curr_trace['magnitudes'],
-            freq_range=(20, 180),
-            frame_range=(onset - 10, end + 10),
-            dominant_freq=self._dominant_freq
-        )
-        self.right_ax.axhline(23, color = 'white', linewidth = 0.3)
-        self.right_ax.axhline(174, color = 'white', linewidth = 0.3)
-        self.right_ax.axvline(onset, color = 'blue')
-        self.right_ax.axvline(end, color = 'blue')
-        self.trial_spectrum.draw()
-
     def process_noise(self):
-        if self.noise_end_selector.value() < self.noise_start_selector.value():
+        if self.noise_end_selector.value() < self.noise_start_selector.value() and self.is_gap_noiseprocess == False:
             QMessageBox.warning(
                 self, 
                 "Warning", 
                 "End frame is smaller than start frame! Select again."
             )
-        elif self.noise_end_selector.value() < self.noise_start_selector.value() + 100:
+        elif self.noise_end_selector.value() < self.noise_start_selector.value() + 100 and self.is_gap_noiseprocess == False:
             QMessageBox.warning(
             self, 
                 "Warning", 
                 "Noise range is too small! 100 frames is the minimum. Select again."
             )
         else:
-            lef, rig = self.noise_start_selector.value(), self.noise_end_selector.value()
-            self.noise_start_selector.setEnabled(False)
-            self.noise_end_selector.setEnabled(False)
-            self.set_noise_range.setEnabled(False)
+            if self.is_gap_noiseprocess == False:
+                lef, rig = self.noise_start_selector.value(), self.noise_end_selector.value()
+                self.noise_start_selector.setEnabled(False)
+                self.noise_end_selector.setEnabled(False)
+                self.set_noise_range.setEnabled(False)
 
-            self.f_data.loc[self._process_line, 'noise start'] = lef
-            self.f_data.loc[self._process_line, 'noise end'] = rig
+                self.f_data.loc[self._process_line, 'noise start'] = lef
+                self.f_data.loc[self._process_line, 'noise end'] = rig
 
-            self.f_data.to_excel(self.f_data_savedir, index=False)
+                self.f_data.to_excel(self.f_data_savedir, index=False)
 
-            self.curr_trace['background_noise'] = get_background_noise(
-                self.curr_trace['magnitudes'],
-                (lef, rig)
-            )
+                self.curr_trace['background_noise'] = get_background_noise(
+                    self.curr_trace['magnitudes'],
+                    (lef, rig)
+                )
+            
+            if "dominant_freq_filtered" not in self.curr_trace.keys():
+                self.curr_trace = run_section_two(self.curr_trace)
+            
+            self.setupAutoSaveTimer()
+            print("      Autosaver setup.")
+            
+            if len(self.curr_trace['onset_frames']) == 0:
+                QMessageBox.warning(
+                    self, 
+                    "Warning", 
+                    "No trial detected!"
+                )
+                self._frames = np.array([[0, 1]], np.int64)
+                self._endfreq = np.zeros(1)
+            else:
+                self._frames = np.vstack(
+                    [self.curr_trace['onset_frames'], self.curr_trace['end_frames']]
+                ).astype(np.int64).T
 
-            self.curr_trace = run_section_two(self.curr_trace)
+                self._endfreq = cp.deepcopy(self.curr_trace['end_freq'])
+
             _limits = len(self.curr_trace['dominant_freq_filtered'])-1
             self.trial_id.setEnabled(True)
             self.onset_frame.setEnabled(True)
@@ -391,14 +395,9 @@ class MainWindow(QMainWindow):
             self.insert_button.setEnabled(True)
             self.delete_button.setEnabled(True)
             self.next_button.setEnabled(True)
+            self.update_button.setEnabled(True)
             self.insert_start_selector.setEnabled(True)
             self.insert_end_selector.setEnabled(True)
-
-            self._frames = np.vstack(
-                [self.curr_trace['onset_frames'], self.curr_trace['end_frames']]
-            ).astype(np.int64).T
-
-            self._endfreq = cp.deepcopy(self.curr_trace['end_freq'])
 
             self.trial_id.setValue(0)
             self.trial_id.setRange(0, self._frames.shape[0]-1)
@@ -412,10 +411,110 @@ class MainWindow(QMainWindow):
 
             self._dominant_freq = cp.deepcopy(self.curr_trace['dominant_freq_filtered'])
 
-            self.update_insert_spectrum()
-            self.update_spectrum()
+            self.left_ax.clear()
+            self.left_buffer = []
+            self.left_ax = display_spectrum(
+                self.left_ax,
+                magnitudes=self.curr_trace['magnitudes'],
+                freq_range=(20, 180),
+                frame_range=(0-10, self._frames[0, 0]+10)
+            )
+            self.left_ax.axhline(23, color = 'white', linewidth = 0.3)
+            self.left_ax.axhline(174, color = 'white', linewidth = 0.3)
+            self.browse_spectrum.draw()
+
+            self.right_ax.clear()
+            self.right_buffer = []
+            self.right_ax = display_spectrum(
+                self.right_ax,
+                magnitudes=self.curr_trace['magnitudes'],
+                freq_range=(20, 180),
+                frame_range=(self._frames[0, 0]-10, self._frames[0, 1]+10)
+            )
+            _x = np.arange(self._frames[0, 0]-10, self._frames[0, 1]+11)
+            a = self.right_ax.plot(
+                _x,
+                self.curr_trace['dominant_freq_filtered'][_x],
+                color = 'yellow'
+            )
+            self.right_buffer = self.right_buffer + a
+            self.right_ax.axhline(23, color = 'white', linewidth = 0.3)
+            self.right_ax.axhline(174, color = 'white', linewidth = 0.3)
+            self.trial_spectrum.draw()
             self._modify_frame_gate = True
 
+    def update_noise_spectrum(self):
+        
+        if self.noise_start_selector.value() + 100 > self.noise_end_selector.value():
+            return
+
+        lef, rig = self.noise_start_selector.value(), self.noise_end_selector.value()
+
+        for temp in self.left_buffer:
+            temp.remove()
+        self.left_buffer = []
+
+        a = self.left_ax.axvline(lef, color = 'blue')
+        b = self.left_ax.axvline(rig, color = 'blue')
+        self.left_buffer.append(a)
+        self.left_buffer.append(b)
+        self.left_ax.set_xlim((lef - 100, rig + 100))
+        self.left_ax.set_ylim((0, 257))
+        self.browse_spectrum.draw()
+
+        self.f_data.loc[self._process_line, 'noise start'] = lef
+        self.f_data.loc[self._process_line, 'noise end'] = rig
+
+        self.f_data.to_excel(self.f_data_savedir, index=False)
+
+    def update_insert_spectrum(self):
+        if self.insert_start_selector.value() >= self.insert_end_selector.value():
+            return
+
+        lef, rig = self.insert_start_selector.value(), self.insert_end_selector.value()
+        
+        for temp in self.left_buffer:
+            temp.remove()
+        self.left_buffer = []
+
+        a = self.left_ax.axvline(lef, color = 'blue')
+        b = self.left_ax.axvline(rig, color = 'blue')
+        self.left_buffer.append(a)
+        self.left_buffer.append(b)
+        self.left_ax.set_xlim((lef - 10, rig + 10))
+        self.left_ax.set_ylim((20, 180))
+        self.browse_spectrum.draw()
+
+    def update_spectrum(self):
+        if self.end_frame.value() < self.onset_frame.value():
+            return
+
+        for temp in self.right_buffer:
+            temp.remove()
+        self.right_buffer = []
+        onset, end = self.onset_frame.value(), self.end_frame.value()
+        a = self.right_ax.axvline(onset, color = 'blue')
+        b = self.right_ax.axvline(end, color = 'blue')
+
+        if onset - 10 < 0:
+            c = self.right_ax.plot(
+                np.arange(end+11),
+                self._dominant_freq[:end+11],
+                color = 'yellow'
+            )
+        else:
+            c = self.right_ax.plot(
+                np.arange(onset-10, end+11),
+                self._dominant_freq[onset-10:end+11],
+                color = 'yellow'
+            )            
+
+        self.right_buffer.append(a)
+        self.right_buffer.append(b)
+        self.right_buffer = self.right_buffer + c
+        self.right_ax.set_xlim((onset - 10, end + 10))
+        self.right_ax.set_ylim((20, 180))
+        self.trial_spectrum.draw()
 
     def switch_trial(self):
         if self._modify_frame_gate == False:
@@ -436,7 +535,7 @@ class MainWindow(QMainWindow):
         self._modify_frame_gate = True
 
         self.update_insert_spectrum()
-        self.update_spectrum()
+        self.update_trial_info()
 
     def update_trial_info(self):
         if self._modify_frame_gate == False:
@@ -444,6 +543,7 @@ class MainWindow(QMainWindow):
         _id = self.trial_id.value()
         self._frames[_id, 0] = self.onset_frame.value()
         self._frames[_id, 1] = self.end_frame.value()
+        self._endfreq[_id] = self.curr_trace['dominant_freq_filtered'][self._frames[_id, 1]]
         self._dominant_freq = correct_freq(
             cp.deepcopy(self.curr_trace['dominant_freq_filtered']),
             self.curr_trace['magnitudes'],
@@ -466,6 +566,7 @@ class MainWindow(QMainWindow):
         idx2 = np.where(self._frames[:, 0] <= rig)[0]
 
         if len(idx1) != len(idx2):
+            print(len(idx1), len(idx2))
             QMessageBox.warning(
                 self, 
                 "Warning", 
@@ -487,6 +588,7 @@ class MainWindow(QMainWindow):
             self.curr_trace['dominant_freq_filtered'][rig]
         )
         self.trial_id.setValue(idx)
+        self.trial_id.setRange(0, self._frames.shape[0] - 1)
         self.switch_trial()
 
     def delete_trial(self):
@@ -498,6 +600,7 @@ class MainWindow(QMainWindow):
         )
         self._frames = np.delete(self._frames, _id, axis = 0)
         self._endfreq = np.delete(self._endfreq, _id)
+        self.trial_id.setRange(0, self._frames.shape[0] - 1)
         self.switch_trial()
 
     def confirm_next(self):
@@ -510,20 +613,61 @@ class MainWindow(QMainWindow):
             self.reset_varaibles()
             self.run_processing()
 
-    def save(self):
-        for i in range(len(self._frames)):
-            self.curr_trace['dominant_freq_filtered'] = correct_freq(
+    def setupAutoSaveTimer(self):
+        # Set up a timer to trigger every 5 minutes (300000 milliseconds)
+        self.autoSaveTimer = QTimer(self)
+        self.autoSaveTimer.timeout.connect(self.autoSaveData)
+        self.autoSaveTimer.start(180000)
+        
+    def autoSaveData(self):
+        if (self.f_data is not None and 
+            self.curr_trace is not None and
+            'dominant_freq_filtered' in self.curr_trace.keys() and
+            self._frames is not None):
+            self.save(is_autosave=True)
+
+    def update_dominant_freq(self):
+        if (
+            self.f_data is not None and 
+            self.curr_trace is not None and
+            'dominant_freq_filtered' in self.curr_trace.keys() and
+            self._frames is not None
+        ):        
+            self.curr_trace['dominant_freq_filtered'] = filter_freq(
                 self.curr_trace['dominant_freq_filtered'],
                 self.curr_trace['magnitudes'],
-                self._frames[i, 0],
-                self._frames[i, 1]
+                self._frames[:, 0],
+                self._frames[:, 1]
             )
+            self._dominant_freq = cp.deepcopy(self.curr_trace['dominant_freq_filtered'])
+            self.update_spectrum()
+
+    def save(self, is_autosave = False):
+        self.curr_trace['dominant_freq_filtered'] = filter_freq(
+            self.curr_trace['dominant_freq_filtered'],
+            self.curr_trace['magnitudes'],
+            self._frames[:, 0],
+            self._frames[:, 1]
+        )
 
         self.curr_trace['onset_frames'] = self._frames[:, 0]
         self.curr_trace['end_frames'] = self._frames[:, 1]
-        self.curr_trace['end_freq'] = self._endfreq
+        self.curr_trace['end_freq'] = update_end_freq(
+            self._endfreq, 
+            self.curr_trace['dominant_freq_filtered'],
+            self._frames[:, 1]
+        )
         self.f_data.to_excel(self.f_data_savedir, index=False)
-        save_trace(self.curr_trace)
+
+        if is_autosave == False:
+            save_trace(self.curr_trace)
+        else:
+            with open(self.curr_trace['save_dir'], 'wb') as handle:
+                pickle.dump(self.curr_trace, handle)
+            print("        Autosave --- ", time.strftime(
+                '%Y-%m-%d %H:%M:%S', 
+                time.localtime(time.time())
+            ))
 
 
 if __name__ == "__main__":
