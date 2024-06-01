@@ -2,8 +2,10 @@ from moviepy.editor import VideoFileClip, AudioFileClip
 import numpy as np
 import os
 import librosa
+from typing import Optional
 from scipy.fft import rfftfreq
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
 from tqdm import tqdm
 import copy as cp
 
@@ -98,21 +100,14 @@ def sliding_stft(
     return frequencies, magnitudes[:, :targ_frames]
 
 def get_background_noise(
-    audio: np.ndarray,
-    range: tuple[int, int],
-    n: int = 512,
-    **fft_kwargs
+    magnitudes: np.ndarray,
+    range: tuple[int, int]
 ) -> np.ndarray:
     """
     Input a piece of pure background noise
     """
-    noise_magnitudes = librosa.stft(
-        audio, 
-        n_fft=n,
-        **fft_kwargs
-    )
-    noise_magnitudes = np.abs(noise_magnitudes)
-    noise_magnitudes = np.percentile(noise_magnitudes, 90, axis=1)
+    noise_magnitudes = np.abs(magnitudes[:, range[0]:range[1]])
+    noise_magnitudes = np.percentile(noise_magnitudes, 95, axis=1)
     return noise_magnitudes
 
 def remove_background_noise(
@@ -139,6 +134,54 @@ def get_dominant_frequency(magnitudes: np.ndarray) -> np.ndarray:
     """
     return np.argmax(magnitudes, axis=0)
 
+def correct_freq(
+    dominant_freq: np.ndarray,
+    magnitudes: np.ndarray,
+    onset_frame: int,
+    end_frame: int
+) -> np.ndarray:
+    dominant_freq[onset_frame] = 23
+    
+    for i in range(onset_frame+1, end_frame):
+        curr_f = dominant_freq[i]
+        next_f = np.argmax(magnitudes[curr_f:180, i+1]) + curr_f
+        next_next_f = np.argmax(magnitudes[curr_f:180, i+2]) + curr_f
+        if next_f < curr_f:
+            dominant_freq[i+1] = curr_f
+        elif next_f > 1.4 * curr_f: 
+            dominant_freq[i+1] = curr_f
+        else:
+            if next_f == next_next_f or i == end_frame-1:
+                dominant_freq[i+1] = next_f
+            else:
+                dominant_freq[i+1] = curr_f
+    
+    return dominant_freq
+
+def reset_freq(
+    dominant_freq: np.ndarray,
+    onset_frame: int,
+    end_frame: int
+) -> np.ndarray:
+    dominant_freq[onset_frame:end_frame+1] = 0
+    return dominant_freq
+
+def display_spectrum(
+    ax: Axes,
+    magnitudes: np.ndarray,
+    freq_range: tuple[int, int],
+    frame_range: tuple[int, int],
+    dominant_freq: Optional[np.ndarray] = None
+) -> Axes:
+    magnitudes /= np.max(magnitudes, axis=0)
+
+    if dominant_freq is not None:
+        ax.plot(np.arange(magnitudes.shape[1]), dominant_freq, color = 'yellow')
+
+    ax.imshow(magnitudes, aspect="auto", cmap='hot', interpolation='nearest')
+    ax.set_xlim(frame_range)
+    ax.set_ylim(freq_range)
+    return ax
 
 if __name__ == "__main__":
     import pickle
@@ -146,7 +189,7 @@ if __name__ == "__main__":
         read_dlc, process_dlc, get_reward_info, get_lever_event, 
         coordinate_event_behav
     )
-    from replay.preprocess.behav import identify_trials2, get_freqseq_info
+    from replay.preprocess.behav import identify_trials, get_freqseq_info
     dir_name = r"E:\behav\SMT\27049\20220516\session 1"
     
     audio = read_audio(dir_name)
@@ -163,9 +206,8 @@ if __name__ == "__main__":
     
     ratio = audio['audio_fps'] / audio['video_fps']
     background_noise = get_background_noise(
-        audio_conv, 
-        range = (int(43000 * ratio), int(45500 * ratio)),#(int(31200 * ratio), int(33700 * ratio)), 
-        n = 512
+        magnitudes, 
+        range = (41500, 46100),#(int(31200 * ratio), int(33700 * ratio)), 
     )
     
     magnitudes = remove_background_noise(magnitudes, background_noise)
@@ -185,11 +227,11 @@ if __name__ == "__main__":
     # reward
     #reward_time = get_reward_info(dir_name)
     print(time_indicator, time_indicator.shape)
-    onset, end, dominant_freq_filtered, end_freq = identify_trials2(
-        dominant_freq=cp.deepcopy(dominant_freq),
-        time_indicator=cp.deepcopy(time_indicator),
+    onset, end, dominant_freq_filtered, end_freq = identify_trials(
+        dominant_freq=cp.deepcopy(dominant_freq)
     )
-
+    print(onset)
+    print(end)
     idx = np.where(dominant_freq_filtered != 0)[0]
     
     print(onset.shape)
