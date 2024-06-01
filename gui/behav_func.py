@@ -66,8 +66,11 @@ def run_section_two(trace: dict) -> dict:
 
     # Get reward info
     print("  3. Get Lever Status")
-    dlc_data = read_dlc(os.path.dirname(trace['save_dir']))
-    trace.update(process_dlc(dlc_data))
+    try:
+        dlc_data = read_dlc(os.path.dirname(trace['save_dir']))
+        trace.update(process_dlc(dlc_data))
+    except:
+        print("DLC file not found!")
 
     # Get reward info
     print("  4. Get Reward Status")
@@ -100,10 +103,7 @@ def run_section_two(trace: dict) -> dict:
     return trace
 
 def save_trace(trace: dict) -> None:
-    print(f"    Finally, confirm {len(trace['onset_frames'])} trials, with onset frames:")
-    print(f"      {trace['onset_frames']}")
-    print(f"    and end frames:")
-    print(f"      {trace['end_frames']}")
+    print(f"    Finally, confirm {len(trace['onset_frames'])} trials")
     print("  6. Save Data -------------------------")
     
     with open(trace['save_dir'], 'wb') as handle:

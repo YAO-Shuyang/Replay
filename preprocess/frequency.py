@@ -121,7 +121,8 @@ def remove_background_noise(
     -----
     Background noise was generated in advance.
     """
-    magnitudes = magnitudes - background_noise[:, np.newaxis]
+    magnitudes[23:, :] = magnitudes[23:, :] - background_noise[23:, np.newaxis]
+    magnitudes[:23, :] *= 0.0001
     magnitudes[magnitudes < 0] = 0
 
     # Normalize across axis 0
@@ -140,18 +141,17 @@ def correct_freq(
     onset_frame: int,
     end_frame: int
 ) -> np.ndarray:
-    dominant_freq[onset_frame] = 23
     
-    for i in range(onset_frame+1, end_frame):
+    for i in range(onset_frame, end_frame):
         curr_f = dominant_freq[i]
         next_f = np.argmax(magnitudes[curr_f:180, i+1]) + curr_f
         next_next_f = np.argmax(magnitudes[curr_f:180, i+2]) + curr_f
         if next_f < curr_f:
             dominant_freq[i+1] = curr_f
-        elif next_f > 1.4 * curr_f: 
+        elif next_f > 1.8 * curr_f: 
             dominant_freq[i+1] = curr_f
         else:
-            if next_f == next_next_f or i == end_frame-1:
+            if np.abs(next_f - next_next_f) <= 2 or i == end_frame-1:
                 dominant_freq[i+1] = next_f
             else:
                 dominant_freq[i+1] = curr_f
@@ -182,6 +182,39 @@ def display_spectrum(
     ax.set_xlim(frame_range)
     ax.set_ylim(freq_range)
     return ax
+
+def filter_freq(
+    dominant_freq: np.ndarray,
+    magnitudes: np.ndarray,
+    onsets: np.ndarray,
+    ends: np.ndarray
+) -> np.ndarray:
+    assert len(onsets) == len(ends)
+    dominant_freq_filtered = np.zeros_like(dominant_freq)
+    for i in range(len(onsets)):
+        dominant_freq_filtered[onsets[i]] = np.argmax(
+            magnitudes[:, onsets[i]]
+        )
+        dominant_freq_filtered = correct_freq(
+            dominant_freq_filtered, 
+            magnitudes, 
+            onsets[i], 
+            ends[i]
+        )
+
+    return dominant_freq_filtered
+
+def update_end_freq(
+    end_freq: np.ndarray, 
+    dominant_freq: np.ndarray,
+    ends: np.ndarray
+) -> np.ndarray:
+    assert len(ends) == len(end_freq)
+
+    for i in range(len(ends)):
+        end_freq[i] = dominant_freq[ends[i]]
+
+    return end_freq
 
 if __name__ == "__main__":
     import pickle
