@@ -40,8 +40,7 @@ def coordinate_event_behav(
 ) -> np.ndarray: ...
 
 # Identify trials' onset and end.
-def identify_trials2(
+def identify_trials(
     dominant_freq: np.ndarray,
-    time_indicator: np.ndarray,
     freq_thre: int = 23
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: ...
