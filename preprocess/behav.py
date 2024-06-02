@@ -115,13 +115,13 @@ def read_behav(
         raise FileNotFoundError(f"Fail to find {f_dir}")
     return pd.read_excel(f_dir, **kwargs)
 
-def transform_time_format(time_stamp: np.ndarray) -> np.ndarray:
+def transform_time_format(time_stamp: Union[np.ndarray, float]) -> np.ndarray:
     """
     transform date time, xx:xx:xx.xxx to xx.xxx
 
     Parameters
     ----------
-    time_stamp : np.ndarray
+    time_stamp : np.ndarray or float
         date time, xx:xx:xx.xxx
 
     Returns
@@ -138,6 +138,9 @@ def transform_time_format(time_stamp: np.ndarray) -> np.ndarray:
     """
     # Split the time strings by ':' and '.' to separate hours, 
     # minutes, seconds, and microseconds
+    if isinstance(time_stamp, str):
+        time_stamp = np.array([time_stamp])
+
     converted_time = np.zeros_like(time_stamp, dtype = np.float64)
 
     for i in range(len(time_stamp)):
@@ -417,6 +420,7 @@ def identify_trials(
     assert len(onset_frames) == len(end_frames) == len(end_freqs)
     
     return onset_frames, end_frames, dominant_freq_filtered, end_freqs
+
 
 
 if __name__ == "__main__":
