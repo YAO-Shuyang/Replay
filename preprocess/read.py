@@ -82,12 +82,13 @@ def read_neural_activity(
 
 def read_neural_time(
     dir_name: str,
-    file_name: str = "spike_times.npy"
+    file_name: str = "spike_times.npy",
+    fps: int = 30000
 ) -> np.ndarray:
     """
     read related neural time
     """
-    return read_npy(dir_name=dir_name, file_name=file_name)
+    return read_npy(dir_name=dir_name, file_name=file_name).astype(np.float64) / fps 
 
 def read_good_units(
     dir_name: str,
@@ -103,7 +104,11 @@ def read_good_units(
         )
     return np.loadtxt(f_dir).astype(np.int64)
 
-def read_LFP(dir_name: str) -> np.ndarray:
+def read_LFP(
+    dir_name: str, 
+    n_channel: int = 385,
+    fps: int = 2500
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Read Local Field Potential.
 
@@ -114,6 +119,10 @@ def read_LFP(dir_name: str) -> np.ndarray:
     ----------
     dir_name : str
         Directory of local field potential data.
+    n_channel : int
+        Number of LFP channels. for probe 3B2 should be 385; defaults to 385.
+    fps : int
+        Sampling rate of LFP. defaults to 2500 Hz.
 
     Returns
     -------
@@ -133,21 +142,24 @@ def read_LFP(dir_name: str) -> np.ndarray:
 
     f_dir = os.path.join(dir_name, file_name)
 
-    with open(f_dir, 'r') as f:
-        data = np.fromfile(f)
+    lfp_recording = np.memmap(f_dir, mode='r', dtype=np.int16, order='C')
+    n_len = lfp_recording.shape[0] // n_channel
+    lfp_recording = np.reshape(lfp_recording, (n_len, n_channel)).T
+    lfp_time = np.arange(0, n_len/fps, 1/fps)
 
-    return data
+    return lfp_recording, lfp_time
 
 def read_npxdata(dir_name: str) -> dict:
     """
     read all neuropixel data from the given directory
     """
-    spike_times = read_neural_time(f1['npx_path'][0])
-    spike_clusters = read_neural_activity(f1['npx_path'][0])
+    spike_times = read_neural_time(dir_name)
+    spike_clusters = read_neural_activity(dir_name)
     
     n_neuron = np.max(spike_clusters)
-    brain_region = read_brain_region(f1['npx_path'][0], n_neuron)
-    good_units = read_good_units(f1['npx_path'][0])
+    brain_region = read_brain_region(dir_name, n_neuron)
+    good_units = read_good_units(dir_name)
+    lfp, lfp_time = read_LFP(dir_name, n_channel=385, fps=2500)
 
     # Test length consistency
     assert np.where(brain_region != '')[0].shape[0] == len(good_units)
@@ -160,6 +172,9 @@ def read_npxdata(dir_name: str) -> dict:
         'spike_clusters': spike_clusters,
         'brain_region': brain_region,
         'good_units': good_units,
+        'lfp': lfp,
+        'lfp_time': lfp_time,
+        'n_lfp_channel': 385,
         'n_neuron': n_neuron
     }
 

@@ -38,7 +38,7 @@ def read_audio(
 
     # Get time from duration and convert it to milisecond
     audio_time = np.linspace(0, audio.duration, n_frame+1)[:-1]
-    video_time = np.linspace(0, duration, video_frames)[:-1]
+    video_time = np.linspace(0, duration, video_frames+1)[:-1]
 
     return {
         "duration": duration,

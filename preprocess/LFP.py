@@ -104,12 +104,14 @@ class SeekSurface:
 
                 # load file into memory
                 lfp_recording = np.memmap('{}{}{}'.format(self.lfp_dir, os.sep, file), mode='r', dtype=np.int16, order='C')
-
+                print(lfp_recording.shape)
                 # find the total number of LFP samples
                 lfp_samples = lfp_recording.shape[0] // nchan
 
                 # reshape array, but because channels are columns, the order stays C
                 lfp_data = lfp_recording.reshape((lfp_samples, nchan), order='C')
+
+                print(lfp_data.shape)
 
                 # depending on the gain settings, convert data to voltage
                 if lfp_gain_setting == 250:
@@ -246,4 +248,7 @@ class SeekSurface:
 
 
 if __name__ == '__main__':
-    from replay.local_path import f1
+    from replay.local_path import f1_behav
+
+    seeker = SeekSurface(f1_behav['npx_folder'][0])
+    seeker.find_surface_channel()
