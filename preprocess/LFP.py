@@ -21,7 +21,6 @@ from scipy.signal import welch
 from scipy.ndimage import gaussian_filter1d
 import matplotlib.pyplot as plt
 
-
 class SeekSurface:
 
     def __init__(self, lfp_dir):
