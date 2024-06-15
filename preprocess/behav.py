@@ -293,11 +293,7 @@ def _search_trial_ends(
         if dominant_freq[i+1] > 1.4 * dominant_freq[i]:
             return i, dominant_freq
 
-    plt.figure()
-    plt.plot(np.arange(onset_frame, dominant_freq.shape[0]), dominant_freq[onset_frame:])
-    plt.title("Failure in identifying the trial ends")
-    plt.xlabel("Frame")
-    plt.show()
+    return dominant_freq.shape[0]-1, dominant_freq
     raise Exception(f"Fail to find trial end, onset frame: {onset_frame}")
 
 

@@ -22,6 +22,7 @@ def read_audio(
 
     # Read audio from video
     video = VideoFileClip(f_dir)
+    print(video.duration)
     audio = video.audio
 
     # Convert to array
@@ -145,7 +146,12 @@ def correct_freq(
     for i in range(onset_frame, end_frame):
         curr_f = dominant_freq[i]
         next_f = np.argmax(magnitudes[curr_f:180, i+1]) + curr_f
-        next_next_f = np.argmax(magnitudes[curr_f:180, i+2]) + curr_f
+        
+        if i+2 <= magnitudes.shape[1] - 1:
+            next_next_f = np.argmax(magnitudes[curr_f:180, i+2]) + curr_f
+        else:
+            next_next_f = next_f
+            
         if next_f < curr_f:
             dominant_freq[i+1] = curr_f
         elif next_f > 1.8 * curr_f: 

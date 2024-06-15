@@ -18,6 +18,7 @@ from replay.gui.behav_func import run_section_one, run_section_two, save_trace
 from replay.preprocess.frequency import correct_freq, display_spectrum, reset_freq
 from replay.preprocess.frequency import get_background_noise, filter_freq, update_end_freq
 from replay.gui.arrowspinbox import ArrowSpinBox
+from replay.gui.magnitude_manual_corrector import MagnitudesCorrector
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -120,11 +121,15 @@ class MainWindow(QMainWindow):
         self.update_button = QPushButton("Update Frequency")
         self.update_button.clicked.connect(self.update_dominant_freq)
         self.update_button.setEnabled(False)
+        self.modifier_button = QPushButton("ModifyMag")
+        self.modifier_button.clicked.connect(self.modify_magnitude)
+        self.modifier_button.setEnabled(False)
         modifyLayout = QHBoxLayout()
         modifyLayout.addWidget(self.insert_button, 1)
         modifyLayout.addWidget(self.delete_button, 1)
         modifyLayout.addWidget(self.next_button, 1)
         modifyLayout.addWidget(self.update_button, 2)
+        modifyLayout.addWidget(self.modifier_button, 2)
         self.leftLayout.addLayout(modifyLayout)
 
         # Insert Line
@@ -273,6 +278,7 @@ class MainWindow(QMainWindow):
         self.delete_button.setEnabled(False)
         self.next_button.setEnabled(False)
         self.update_button.setEnabled(False)
+        self.modifier_button.setEnabled(False)
 
         self.left_ax.clear()
         self.browse_spectrum.draw()
@@ -396,6 +402,7 @@ class MainWindow(QMainWindow):
             self.delete_button.setEnabled(True)
             self.next_button.setEnabled(True)
             self.update_button.setEnabled(True)
+            self.modifier_button.setEnabled(True)
             self.insert_start_selector.setEnabled(True)
             self.insert_end_selector.setEnabled(True)
 
@@ -496,18 +503,13 @@ class MainWindow(QMainWindow):
         a = self.right_ax.axvline(onset, color = 'blue')
         b = self.right_ax.axvline(end, color = 'blue')
 
-        if onset - 10 < 0:
-            c = self.right_ax.plot(
-                np.arange(end+11),
-                self._dominant_freq[:end+11],
-                color = 'yellow'
-            )
-        else:
-            c = self.right_ax.plot(
-                np.arange(onset-10, end+11),
-                self._dominant_freq[onset-10:end+11],
-                color = 'yellow'
-            )            
+        x_lef = max(0, onset - 10)
+        x_rig = min(end+11, self._dominant_freq.shape[0])
+        c = self.right_ax.plot(
+            np.arange(x_lef, x_rig),
+            self._dominant_freq[x_lef:x_rig],
+            color = 'yellow'
+        )     
 
         self.right_buffer.append(a)
         self.right_buffer.append(b)
@@ -612,6 +614,55 @@ class MainWindow(QMainWindow):
             self.save()
             self.reset_varaibles()
             self.run_processing()
+
+    def modify_magnitude(self):
+        if self.curr_trace is None:
+            QMessageBox.warning(
+                self, 
+                "Warning", 
+                "No trace found!"
+            )
+            return
+        else:
+            if 'magnitudes' not in self.curr_trace.keys():
+                QMessageBox.warning(
+                    self, 
+                    "Warning", 
+                    "No magnitudes found!"
+                )
+                return
+            else:
+                self.corrector = MagnitudesCorrector(
+                    self.curr_trace['magnitudes'],
+                    self._frames[self.trial_id.value(), 0],
+                    self._frames[self.trial_id.value(), 1]
+                )
+                print(1)
+                self.corrector.show()
+                self.corrector.rateMapUpdated.connect(self.correct_magnitudes)
+    
+    def correct_magnitudes(self, corrected_magnitudes):
+        self.curr_trace['magnitudes'] = corrected_magnitudes
+            
+        self.right_ax.clear()
+        self.right_buffer = []
+        self.right_ax = display_spectrum(
+            self.right_ax,
+            magnitudes=self.curr_trace['magnitudes'],
+            freq_range=(20, 180),
+            frame_range=(self._frames[0, 0]-10, self._frames[0, 1]+10)
+        )
+        _x = np.arange(self._frames[0, 0]-10, self._frames[0, 1]+11)
+        a = self.right_ax.plot(
+            _x,
+            self.curr_trace['dominant_freq_filtered'][_x],
+            color = 'yellow'
+        )
+        self.right_buffer = self.right_buffer + a
+        self.right_ax.axhline(23, color = 'white', linewidth = 0.3)
+        self.right_ax.axhline(174, color = 'white', linewidth = 0.3)
+        self.update_spectrum()
+        self.trial_spectrum.draw()
 
     def setupAutoSaveTimer(self):
         # Set up a timer to trigger every 5 minutes (300000 milliseconds)

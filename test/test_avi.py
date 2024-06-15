@@ -3,7 +3,8 @@ from replay.preprocess.frequency import read_audio, sliding_stft
 from replay.preprocess.frequency import get_dominant_frequency
 from matplotlib import pyplot as plt
 
-audio = read_audio(r"E:\LRJ\ori\SMT#27049\behavior\220517", file_name="220517.49.smt.mec.02-0517114357.avi")
+#audio = read_audio(r"E:\LRJ\ori\SMT#27049\behavior\220517", file_name="220517.49.smt.mec.02-0517114357.avi")
+audio = read_audio(r"E:\LRJ\processed\PPR#27124\behavior_ppr\0316", file_name="20230316_105917.mp4")
 frequencies, magnitudes = sliding_stft(
     audio['audio'], 
     duration = audio['duration'],
